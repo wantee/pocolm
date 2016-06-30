@@ -13,6 +13,7 @@ fold_dev_opt=
 # purposes.
 
 #fold_dev_opt="--fold-dev-into=swbd1"
+filter_count=true
 
 get_word_counts.py data/text data/text/word_counts
 get_unigram_weights.py data/text/word_counts > data/text/unigram_weights
@@ -29,20 +30,29 @@ prepare_int_data.py data/text data/vocab_20k.txt data/int_20k
 
 for order in 3 4 5; do
 
-  get_counts.sh data/int_20k ${order} data/counts_20k_${order}
+  all_count_dir=data/counts_20k_${order}
+  get_counts.sh data/int_20k ${order} ${all_count_dir}
+
+  if ${filter_count}; then
+    filter_count_dir=data/counts_20k_f${order}
+    filter_counts.py ${all_count_dir} ${order} ${filter_count_dir}
+    count_dir=${filter_count_dir}
+  else
+    count_dir=${all_count_dir}
+  fi
 
   ratio=10
   splits=5
-  subset_count_dir.sh data/counts_20k_${order} ${ratio} data/counts_20k_${order}_subset${ratio}
+  subset_count_dir.sh ${count_dir} ${ratio} ${count_dir}_subset${ratio}
 
   optimize_metaparameters.py --progress-tolerance=1.0e-05 --num-splits=${splits} \
-    data/counts_20k_${order}_subset${ratio} data/optimize_20k_${order}_subset${ratio}
+    ${count_dir}_subset${ratio} data/optimize_20k_${order}_subset${ratio}
 
   optimize_metaparameters.py --warm-start-dir=data/optimize_20k_${order}_subset${ratio} \
       --progress-tolerance=1.0e-03 --gradient-tolerance=0.01 --num-splits=${splits} \
-    data/counts_20k_${order} data/optimize_20k_${order}
+    ${count_dir} data/optimize_20k_${order}
 
-  make_lm_dir.py $fold_dev_opt --num-splits=${splits} --keep-splits=true data/counts_20k_${order} \
+  make_lm_dir.py $fold_dev_opt --num-splits=${splits} --keep-splits=true ${all_count_dir} \
      data/optimize_20k_${order}/final.metaparams data/lm_20k_${order}
 
   mkdir -p data/arpa
