@@ -19,6 +19,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <fstream>
 #include <vector>
@@ -120,7 +121,12 @@ class IntCountFilter {
               << filtered_states_ << " LM states(with "
               << filtered_ngrams_ << " n-grams) from total "
               << total_states_ << " LM states(with "
-              << total_ngrams_ << " n-grams).\n";
+              << total_ngrams_ << " n-grams), reduction is "
+              << std::fixed << std::setprecision(2)
+              << 100 * (double)(total_states_ - filtered_states_) / total_states_
+              << "% ("
+              << 100 * (double)(total_ngrams_ - filtered_ngrams_) / total_ngrams_
+              << "%).\n";
   }
 
   std::ifstream hist_list_input_;
