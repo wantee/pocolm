@@ -158,7 +158,7 @@ class NullCountsReader {
 class FloatCountsPruner {
  public:
   // usage is:
-  // float-counts-prune <threshold> <num-words> <float-counts-input> <protected-counts-input> <order1-counts-output> ... <orderN-counts-output>
+  // float-counts-prune <threshold>[:<target-num-ngrams>] <num-words> <float-counts-input> <protected-counts-input> <order1-counts-output> ... <orderN-counts-output>
 
   FloatCountsPruner(int argc, const char **argv):
       order_(argc - 5), outputs_(NULL),
@@ -205,6 +205,27 @@ class FloatCountsPruner {
     }
     std::cout << num_ngrams_per_order_[i] << '\n';
 
+    if (histogram_ != NULL) {
+        int64 cur_num = num_ngrams_shadowed_ + num_ngrams_protected_;
+        std::cout << cur_num << '\n';
+        cur_num = 0;
+
+        int32 i;
+        for (i = histogram_num_bin_ - 1; i >= 0; i--) {
+            cur_num += histogram_[i];
+            if (cur_num >= target_num_ngrams_) {
+                std::cout << min_histogram_val_ + i * histogram_bin_width << '\n';
+                std::cout << cur_num << '\n';
+                break;
+            }
+        }
+        if (i < 0) {
+            std::cout << 0.0 << '\n';
+        }
+
+        delete [] histogram_;
+    }
+
     std::cerr << "float-counts-prune: aside from unigram there were "
               << num_ngrams_ << " nonzero n-grams.\n";
     int64 num_ngrams_eligible = num_ngrams_ - num_ngrams_shadowed_ -
@@ -223,17 +244,44 @@ class FloatCountsPruner {
   void SetThresholdAndNumWords(const char **argv) {
     char *end;
     threshold_ = strtod(argv[1], &end);
-    if (*end != '\0' || end == argv[1] || threshold_ <= 0.0 ||
+    if (end == argv[1] || threshold_ <= 0.0 ||
         threshold_ - threshold_ != 0.0) {
       std::cerr << "float-counts-prune: invalid threshold: '"
                 << argv[1] << "'\n";
       exit(1);
     }
 
+    target_num_ngrams_ = 0;
+    histogram_ = NULL;
+    if (*end != '\0') {
+        if (*end != ':') {
+            std::cerr << "float-counts-prune: invalid threshold: '"
+                << argv[1] << "'\n";
+            exit(1);
+        }
+        end++;
+
+        target_num_ngrams_ = strtol(end, &end, 10);
+        if (target_num_ngrams_ <= 0 || *end != '\0') {
+            std::cerr << "float-counts-prune: invalid target-num-ngram: '"
+                << argv[1] << "'\n";
+            exit(1);
+        }
+
+        min_histogram_val_ = 0.0;
+        max_histogram_val_ = 5.0;
+        histogram_bin_width = 0.01;
+        histogram_num_bin_ = (max_histogram_val_ - min_histogram_val_) / histogram_bin_width;
+        histogram_ = new int64[histogram_num_bin_];
+        for (int32 i = 0; i < histogram_num_bin_; i++) {
+            histogram_[i] = 0;
+        }
+    }
+
     num_words_ = strtol(argv[2], &end, 10);
     if (num_words_ <= 3 || *end != '\0') {
       std::cerr << "float-counts-prune: expected num-words as 2nd argument, "
-                << "got '" << argv[1] << "'\n";
+                << "got '" << argv[2] << "'\n";
       exit(1);
     }
   }
@@ -544,6 +592,16 @@ class FloatCountsPruner {
         total_logprob_change_ += logprob_change;
         num_ngrams_pruned_++;
       } else {
+        if (histogram_ != NULL) {
+            int32 idx = (-logprob_change - min_histogram_val_) / histogram_bin_width;
+            if (idx < 0) {
+                idx = 0;
+            }
+            if (idx > histogram_num_bin_ - 1) {
+                idx = histogram_num_bin_ - 1;
+            }
+            histogram_[idx]++;
+        }
         num_ngrams_per_order_[history_length]++;
       }
     }
@@ -669,6 +727,18 @@ class FloatCountsPruner {
 
   // the number of n-grams that were pruned away.
   int64 num_ngrams_pruned_;
+
+  // target number of n-grams used to estimate threshold
+  int64 target_num_ngrams_;
+  // min and max value in histogram
+  float min_histogram_val_;
+  float max_histogram_val_;
+  // width of histogram bin
+  float histogram_bin_width;
+  // number of bins in histogram, equals to (max_histogram_val_ - min_histogram_val_) / histogram_bin_width
+  int32 histogram_num_bin_;
+  // histogram of counts sorted by logprob_change
+  int64 *histogram_;
 };
 
 
@@ -678,7 +748,7 @@ class FloatCountsPruner {
 
 int main (int argc, const char **argv) {
   if (argc < 6) {
-    std::cerr << "Usage: float-counts-prune <threshold> <num-words> <float-counts-input> <protected-counts-input> <order1-output> ... <orderN-output>\n"
+    std::cerr << "Usage: float-counts-prune <threshold>[:<target-num-ngrams>] <num-words> <float-counts-input> <protected-counts-input> <order1-output> ... <orderN-output>\n"
               << "E.g. float-counts-prune 1.6 20000 float.all protected.all float.1 float.2 float.3\n"
               << "This program does entropy pruning of a language model.  Any count that is\n"
               << "not listed in <protected-counts-input> (which will probably be the output\n"
@@ -686,7 +756,9 @@ int main (int argc, const char **argv) {
               << "from backing off the count to its lower-order history state would be less than\n"
               << "the threshold.\n"
               << "The output is written separately per order, for later\n"
-              << "merging.\n";
+              << "merging.\n"
+              << "If a <target-num-ngrams> is specified, It will estimate the threshold"
+              << "which can be used in the next pruning to get a LM with num-ngrams.\n";
     exit(1);
   }
 
