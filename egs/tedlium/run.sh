@@ -5,6 +5,7 @@ export POCOLM_ROOT=$(cd ../..; pwd -P)
 export PATH=$PATH:$POCOLM_ROOT/scripts
 
 num_dev_sentences=15000
+filter_count=true
 # num_cantab_TEDLIUM_sentences=250000
 vocab_size=100000
 
@@ -39,22 +40,31 @@ time_optimization[2]=`date +%s`
 
 for order in 3 4 5; do
 
-  get_counts.sh data/int_${vocab_size} ${order} data/counts_${vocab_size}_${order}
+  all_counts_dir=data/counts_${vocab_size}_${order}
+  get_counts.sh data/int_${vocab_size} ${order} ${all_counts_dir}
+
+  if ${filter_count}; then
+    filter_counts_dir=data/counts_${vocab_size}_f${order}
+    filter_counts.py ${all_counts_dir} ${order} ${filter_counts_dir}
+    counts_dir=${filter_counts_dir}
+  else
+    counts_dir=${all_counts_dir}
+  fi
 
   ratio=10
   splits=5
-  subset_count_dir.sh data/counts_${vocab_size}_${order} ${ratio} data/counts_${vocab_size}_${order}_subset${ratio}
+  subset_count_dir.sh ${counts_dir} ${ratio} ${counts_dir}_subset${ratio}
 
   mkdir -p data/optimize_${vocab_size}_${order}_subset${ratio}
 
   optimize_metaparameters.py --progress-tolerance=2.0e-04 --num-splits=${splits} \
-    data/counts_${vocab_size}_${order}_subset${ratio} data/optimize_${vocab_size}_${order}_subset${ratio}
+    ${counts_dir}_subset${ratio} data/optimize_${vocab_size}_${order}_subset${ratio}
 
   optimize_metaparameters.py --warm-start-dir=data/optimize_${vocab_size}_${order}_subset${ratio} \
     --progress-tolerance=1.0e-04 --num-splits=${splits} \
-    data/counts_${vocab_size}_${order} data/optimize_${vocab_size}_${order}
+    ${counts_dir} data/optimize_${vocab_size}_${order}
 
-  make_lm_dir.py --num-splits=${splits} data/counts_${vocab_size}_${order} \
+  make_lm_dir.py --num-splits=${splits} ${all_counts_dir} \
      data/optimize_${vocab_size}_${order}/final.metaparams data/lm_${vocab_size}_${order}
   time_optimization[${order}]=`date +%s`
 done
